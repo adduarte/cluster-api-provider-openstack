@@ -438,6 +438,7 @@ func GetSecurityGroups(is *InstanceService, sg_param []openstackconfigv1.Securit
 	return sgIDs, nil
 }
 
+
 // InstanceCreate creates a compute instance.
 // If ServerGroupName is nonempty and no server group exists with that name,
 // then InstanceCreate creates a server group with that name.
@@ -445,6 +446,7 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 	if config == nil {
 		return nil, fmt.Errorf("create Options need be specified to create instace")
 	}
+	// TODO (adduarte) This needs to be modified to allow for port level granularity
 	if config.Trunk == true {
 		trunkSupport, err := GetTrunkSupport(is)
 		if err != nil {
@@ -478,6 +480,8 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 	var nets []openstackconfigv1.PortOpts
 	netsWithoutAllowedAddressPairs := map[string]struct{}{}
 	for _, net := range config.Networks {
+		//TODO (adduarte) this should only return one network . if it returns more than one
+		// that could be a problem!
 		opts := networks.ListOpts(net.Filter)
 		opts.ID = net.UUID
 		ids, err := getNetworkIDsByFilter(is, &opts)
@@ -488,7 +492,10 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 			if net.NoAllowedAddressPairs {
 				netsWithoutAllowedAddressPairs[netID] = struct{}{}
 			}
-			if net.Subnets == nil {
+			// TODO(adduarte)we still have a problem if the nework has been created by hand and has more than one subnet
+			// we should query the number of subnets for the network and bail out if is more than one.
+			// If we don't have a subnet in our config file we simply attach to the network.
+			if net.Subnets == nil { // This should not happen in side this loop. If subnets
 				nets = append(nets, openstackconfigv1.PortOpts{
 					NetworkID:    netID,
 					Tags:         net.PortTags,
@@ -496,7 +503,7 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 					PortSecurity: net.PortSecurity,
 				})
 			}
-
+			//for loop will only work if net.Subnets != nil
 			for _, snetParam := range net.Subnets {
 				sopts := subnets.ListOpts(snetParam.Filter)
 				sopts.ID = snetParam.UUID
@@ -512,6 +519,7 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 				if err != nil {
 					return nil, err
 				}
+				//Add a port to "nets" list for each subnet found on the network.
 				for _, snet := range snetResults {
 					nets = append(nets, openstackconfigv1.PortOpts{
 						NetworkID:    snet.NetworkID,
@@ -575,6 +583,7 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 			Port: port.ID,
 		})
 
+		//all this logic needs to be moved to the per port loop above
 		if config.Trunk == true {
 			allPages, err := trunks.List(is.networkClient, trunks.ListOpts{
 				Name:   name,
@@ -612,6 +621,7 @@ func (is *InstanceService) InstanceCreate(clusterName string, name string, clust
 	}
 
 	for _, portCreateOpts := range config.Ports {
+		//TODO(adduarte) need to create trunk if port is to be a trunked port.
 		port, err := getOrCreatePort(is, name+"-"+portCreateOpts.NameSuffix, portCreateOpts)
 		if err != nil {
 			return nil, err
